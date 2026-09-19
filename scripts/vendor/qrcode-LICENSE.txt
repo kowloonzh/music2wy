@@ -1,0 +1,5 @@
+qrcode-generator (vendored file: qrcode.mjs, qrcode_utf8.mjs)
+Copyright (c) 2011 Kazuhiko Arase
+Licensed under the MIT License. https://www.opensource.org/licenses/mit-license.php
+Source: https://www.npmjs.com/package/qrcode-generator (v2.0.4)
+The word 'QR Code' is a registered trademark of DENSO WAVE INCORPORATED.

@@ -1,0 +1,20 @@
+# ── 运行时状态：绝不提交 ──────────────────────────────
+# 真实状态在 ~/.music2wy/（仓库之外）。下面这些是安全网，
+# 防止有人把 MUSIC2WY_HOME 指到仓库里之后误提交。
+.music2wy/
+cookie.json
+session.json
+last-search.json
+ratelimit.json
+requests.jsonl
+cache/
+downloads/
+logs/
+artifacts/
+login-qr.png
+
+# ── 常规忽略 ──────────────────────────────────────────
+__pycache__/
+*.pyc
+.DS_Store
+*.swp
