@@ -3,7 +3,9 @@
 export const BAD_WORDS = [
   'dj', '慢摇', 'remix', '混音', '伴奏', '铃声', '彩铃', '清唱', '钢琴版', '吉他版',
   '纯音乐', '八音盒', '童声', '合唱版', '恶搞', '串烧', '车载', '加快版', '慢速版',
-  'slowed', 'sped up', 'cover by', '翻自', '模仿', 'live', '现场', '演唱会',
+  'slowed', 'sped up', '翻自', '翻唱', '模仿', 'live', '现场', '演唱会',
+  // 翻唱标注的各种写法（站点上常见「歌名 (cover: 原唱)」）
+  'cover by', 'cover:', 'cover：', '(cover', '（cover', '[cover',
 ];
 // 明显是"同一首歌的不同录音室版本"的关键词，命中不重罚
 export const MILD_WORDS = ['新版', '重制', 'remaster', 'acoustic', '不插电', 'demo'];
@@ -27,7 +29,11 @@ export function scoreCandidate(c, ref) {
 
     const artistHit = refArtists.some((a) => a && (artist.includes(a) || a.includes(artist) && artist.length > 1));
     const artistLoose = refArtists.some((a) => a && low.includes(a));
-    if (artistHit) { s += 50; reasons.push('歌手精确命中+50'); }
+    // 只有"确实给了一个歌手期望值"时才评判歌手；没给期望值（例如只输入了歌名、
+    // 又推不出共识歌手）就不该因此扣所有人的分。
+    if (!refArtists.length) {
+      reasons.push('未指定歌手，跳过歌手项');
+    } else if (artistHit) { s += 50; reasons.push('歌手精确命中+50'); }
     else if (artistLoose) { s += 26; reasons.push('歌手模糊命中+26'); }
     else { s -= 22; reasons.push('歌手不匹配-22'); }
 

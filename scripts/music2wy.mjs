@@ -248,10 +248,13 @@ function consensusArtist(list, title) {
   const sorted = [...counts.entries()].sort((x, y) => y[1] - x[1]);
   if (!sorted.length) return null;
   const [name, n] = sorted[0];
-  const total = [...counts.values()].reduce((a, b) => a + b, 0);
-  // 至少出现 2 次，且占同名候选的 1/4 以上，才算"多数派"。
-  // 阈值定太严会漏掉真原唱（"泸沽湖"里麻园诗人只占 1/3），太松又会把某个翻唱当成原唱。
-  return n >= 2 && n / total >= 0.25 ? name : null;
+  const runnerUp = sorted[1] ? sorted[1][1] : 0;
+  // 判据：「至少出现 2 次」且「是第二名的 2 倍以上」。
+  // 用"相对第二名的优势"而不是"占总数比例"：同名候选里往往混着一大堆各不相同的翻唱，
+  // 原唱占比会被稀释。实测"西充"里麻园诗人出现 3 次、其余各 1 次，占比只有 0.23，
+  // 用比例法（阈值 0.25）刚好漏掉；用倍数法则能稳稳定位。
+  // 反例仍然安全：搜"晴天"时各歌手都只出现 1 次，n=1 直接不成立。
+  return n >= 2 && n >= runnerUp * 2 ? name : null;
 }
 
 /** 组装"期望的元数据"，用于给站点候选打分。 */
