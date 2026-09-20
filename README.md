@@ -70,6 +70,19 @@ node scripts/music2wy.mjs get --pick 1
 node scripts/music2wy.mjs upload "$HOME/.music2wy/downloads/泸沽湖 - 麻园诗人.flac"
 ```
 
+只知道歌手名、想先浏览曲目时，用歌手搜索：
+
+```bash
+node scripts/music2wy.mjs artist "麻园诗人"           # 第 1 页，最多 20 条
+node scripts/music2wy.mjs artist "麻园诗人" --page 2  # 下一页
+node scripts/music2wy.mjs show                    # 重看当前页，不请求站点
+node scripts/music2wy.mjs get --pick 4            # 选定当前页第 4 条后下载
+```
+
+歌手搜索只保留歌手字段匹配的结果，独唱排在合作曲目前，保留不同录音版本。页码来自站点，
+`total` 是搜索记录数，不等于独立歌曲数；翻页后候选编号从 1 重新开始。
+下载时若搜索签名过期，脚本会刷新原页并按歌曲 ID 找回同一条，找不到就停止。先确认候选再下载。
+
 所有命令都把 JSON 打到 stdout，进度信息打到 stderr，方便脚本/agent 解析。
 
 ## 实际效果
@@ -207,6 +220,7 @@ GET  /                                → 带上 sl-session + sl-challenge-jwt�
 login                              扫码登录网易云（终端画二维码 + 弹出 PNG）
 whoami                             查看当前登录账号
 search "<关键词>" [--limit 10]      搜索候选（结合网易云元数据打分排序）
+artist "<歌手名>" [--page N]       按歌手浏览歌曲（每页最多 20 条）
 show                               重新打印上次候选（零请求）
 get --pick N [--quality flac|320]  下载第 N 个候选，写元数据/歌词
 upload <file...> [--title/--artist/--album]
@@ -237,18 +251,26 @@ doctor [--site]                    环境自检（默认不打站点）
 | `--platform <p>` | `kuwo` | 上游平台，**只有 `kuwo` 和 `wyy` 两个值** |
 | `--refresh` | — | 忽略缓存，强制重新搜站点（**会消耗站点配额**） |
 
+**`artist`**
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--page N` | `1` | 查看第 N 页；每页最多 20 条，编号从 1 重新开始 |
+| `--platform <p>` | `kuwo` | 上游平台，只支持 `kuwo` 和 `wyy` |
+| `--refresh` | — | 忽略缓存重新请求当前页（会消耗站点配额） |
+
 **`get`**
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--pick N` | 必填 | 选第 N 个候选（序号来自 `search` 的输出） |
+| `--pick N` | 必填 | 选第 N 个候选（序号来自最近一次 `search` 或 `artist`） |
 | `--quality <q>` | `flac` | `flac` / `320` / `128`；没有 FLAC 会自动退到 320 |
 | `--query "<词>"` | — | 会话失效时重新搜索用的关键词 |
 | `--outdir <dir>` | `~/.music2wy/downloads` | 输出目录 |
 | `--no-lyrics` | — | 不取歌词 |
 | `--no-tag` | — | 不写元数据（需要用 ffmpeg） |
 | `--no-cache` | — | 忽略直链缓存，重新解析 |
-| `--force` | — | 强制重新搜索 |
+| `--force` | — | 强制重新按歌名搜索；歌手会话请先用 `artist --refresh` 更新列表再选编号 |
 
 **`upload`**
 

@@ -6,7 +6,8 @@
  *
  *   login                      弹出二维码扫码登录网易云（登录态缓存到 ~/.music2wy/cookie.json）
  *   whoami                     打印当前登录的网易云账号
- *   search "<关键词>"           在站点搜索候选，结合网易云官方元数据打分排序，写入会话缓存
+ *   search "<关键词>"           按歌名搜索候选，结合网易云官方元数据打分排序
+ *   artist "<歌手>"            按歌手列出歌曲，可用 --page 翻页，写入供 get 使用的会话
  *   show                       重新打印上次搜索的候选（不打站点，不消耗配额）
  *   get --pick N               下载第 N 个候选（默认用上次搜索的会话），写元数据/歌词
  *   upload <file...>           上传本地文件到网易云云盘
@@ -20,7 +21,8 @@ import { spawn } from 'node:child_process';
 import * as ne from './lib/ne.mjs';
 import * as flac from './lib/flac.mjs';
 import * as up from './lib/upload.mjs';
-import { rankCandidates, pickVariant } from './lib/rank.mjs';
+import { rankCandidates, rankArtistCandidates, pickVariant } from './lib/rank.mjs';
+import { refreshArtistUrl } from './lib/artist.mjs';
 import * as tag from './lib/tag.mjs';
 import * as qr from './lib/qr.mjs';
 import {
@@ -356,17 +358,73 @@ async function cmdSearch(args) {
   });
 }
 
+// ------------------------------------------------------------------ artist（按歌手浏览，不把歌手名当成歌名评分）
+async function cmdArtist(args) {
+  const artist = args.positional.join(' ').trim();
+  need(artist, '用法: music2wy artist "<歌手名>" [--page N]');
+  const page = Number(args.flags.page || 1);
+  need(Number.isSafeInteger(page) && page >= 1, '--page 必须是正整数');
+  const platform = args.flags.platform || 'kuwo';
+  need(['kuwo', 'wyy'].includes(platform), '--platform 只支持 kuwo 或 wyy');
+
+  const size = 20; // 站点每页最多返回 20 条；翻页时始终保留原始页码
+  const key = `artist:${platform}:${artist}:${page}`;
+  const ttl = loadConfig().searchCacheTtlMs;
+  let cached = args.flags.refresh ? null : cacheGet('search', key, ttl);
+  if (!cached && page === 1 && !args.flags.refresh) {
+    // 用户刚用旧的 search 搜过同一个歌手名时复用结果，避免重复打敏感站点。
+    cached = cacheGet('search', `${platform}:${artist}`, ttl);
+    if (cached?.value?.list) cacheSet('search', key, cached.value);
+  }
+  let res;
+  if (cached) {
+    res = cached.value;
+    log(`[缓存] 歌手「${artist}」第 ${page} 页（不消耗站点配额）`);
+  } else {
+    log(`[站点] 按歌手搜索「${artist}」第 ${page} 页 (platform=${platform}) …`);
+    res = await flac.search(artist, { platform, page, size, allowCache: !args.flags.refresh });
+    cacheSet('search', key, res);
+  }
+
+  const ranked = rankArtistCandidates((res.list || []).slice(0, size), artist);
+  const total = Number(res.total) || 0;
+  const hasMore = page * size < total;
+  saveSession({
+    mode: 'artist', query: artist, artist, siteQuery: artist, platform,
+    page, size, at: Date.now(), ref: null, expect: null,
+    candidates: ranked.map((c) => ({ ...c, _platform: c.platform || platform })),
+  });
+  return emit({
+    ok: true, mode: 'artist', artist, platform, page, pageSize: size,
+    total, sourceCount: res.list?.length || 0, candidateCount: ranked.length,
+    hasMore, fromCache: !!cached,
+    candidates: ranked.map((c, i) => ({
+      index: i + 1, platform: c.platform || platform,
+      songid: String(c.songid ?? c.id ?? ''),
+      name: c.name, artist: c.artist, album: c.album || '',
+      duration: c.duration || 0, durationText: mmss(c.duration),
+      formats: (c.minfo || []).map((m) => `${m.format}/${m.bitrate}k/${m.size || ''}`.replace(/\/$/, '')),
+      score: null, recommended: false,
+      warnings: c._bad?.length ? [`命中过滤词: ${c._bad.join('/')}`] : [],
+    })),
+    next: ranked.length
+      ? `展示候选并等用户选编号；下载用 get --pick N。${hasMore ? `更多歌曲用 artist "${artist}" --page ${page + 1}。` : ''}`
+      : `本页没有歌手「${artist}」的曲目。${hasMore ? `可看第 ${page + 1} 页。` : '可换关键词或上游平台。'}`,
+  });
+}
+
 function cmdShow() {
   const s = loadSession();
   if (!s) return fail('还没有搜索记录，先运行 search');
   const out = s.candidates.map((c, i) => ({
     index: i + 1,
     name: c.name, artist: c.artist, album: c.album || '',
-    durationText: mmss(c.duration), score: c._score,
+    durationText: mmss(c.duration), score: s.mode === 'artist' ? null : c._score,
     formats: (c.minfo || []).map((m) => `${m.format}/${m.bitrate}k`),
-    recommended: i === 0,
+    recommended: s.mode === 'artist' ? false : i === 0,
   }));
-  return emit({ ok: true, query: s.query, at: new Date(s.at).toISOString(), ageMinutes: Math.round((Date.now() - s.at) / 60000), candidates: out });
+  return emit({ ok: true, mode: s.mode || 'song', query: s.query, page: s.page || 1,
+    at: new Date(s.at).toISOString(), ageMinutes: Math.round((Date.now() - s.at) / 60000), candidates: out });
 }
 
 // ------------------------------------------------------------------ get（下载）
@@ -377,6 +435,8 @@ async function cmdGet(args) {
   const force = !!args.flags.force;
 
   let session = loadSession();
+  need(!(session?.mode === 'artist' && force),
+    '歌手搜索会话请先运行 artist "<歌手名>" --page N --refresh，再按新列表选择编号；不要对旧编号使用 get --force');
   if (!session || (args.flags.query && session.query !== args.flags.query) || force) {
     // 需要重新搜索：走和 cmdSearch 一样的"网易云参照 → 推导站点搜索词"逻辑
     const q = args.flags.query || session?.query;
@@ -437,19 +497,34 @@ async function cmdGet(args) {
         platform: cand._platform, songid: cand.songid, time: cand.time, sign: cand.sign,
         format: variant.format, bitrate: variant.bitrate,
       });
+      if (session.mode === 'artist' && !info?.url) throw new Error(info?.msg || '站点没有返回直链');
     } catch (e) {
       log(`[站点] 直链解析失败（sign 可能已过期）：${e.message}`);
       log('[站点] 重新搜索拿新的 sign …');
-      const res = await flac.search(session.siteQuery || session.query, { platform: session.platform || 'kuwo', size: 30, allowCache: false });
-      const ranked = rankCandidates(res.list || [], session.expect || session.ref);
-      saveSession({ ...session, at: Date.now(), candidates: ranked.map((c) => ({ ...c, _platform: c.platform || session.platform || 'kuwo' })) });
-      const c2 = ranked[pick - 1] || ranked[0];
-      const v2 = pickVariant(c2, quality) || variant;
-      info = await flac.resolve({
-        platform: c2._platform || session.platform, songid: c2.songid, time: c2.time, sign: c2.sign,
-        format: v2.format, bitrate: v2.bitrate,
-      });
-      Object.assign(cand, c2);
+      const isArtist = session.mode === 'artist';
+      if (isArtist) {
+        const refreshed = await refreshArtistUrl({
+          session, candidate: cand, quality, search: flac.search, resolve: flac.resolve,
+        });
+        info = refreshed.info;
+        Object.assign(cand, refreshed.candidate);
+        const candidates = session.candidates.map((c, i) =>
+          i === pick - 1 ? { ...cand, _platform: cand.platform || session.platform } : c);
+        saveSession({ ...session, at: Date.now(), candidates });
+      } else {
+        const res = await flac.search(session.siteQuery || session.query,
+          { platform: session.platform || 'kuwo', size: 30, allowCache: false });
+        const ranked = rankCandidates(res.list || [], session.expect || session.ref);
+        const c2 = ranked[pick - 1] || ranked[0];
+        const v2 = pickVariant(c2, quality) || variant;
+        info = await flac.resolve({
+          platform: c2._platform || session.platform, songid: c2.songid, time: c2.time, sign: c2.sign,
+          format: v2.format, bitrate: v2.bitrate,
+        });
+        Object.assign(cand, c2);
+        saveSession({ ...session, at: Date.now(),
+          candidates: ranked.map((c) => ({ ...c, _platform: c.platform || session.platform || 'kuwo' })) });
+      }
     }
     cacheSet('url', urlKey, info);
   }
@@ -844,6 +919,7 @@ async function main() {
     case 'login': case 'qr': return cmdLogin(args.flags);
     case 'whoami': return cmdWhoami();
     case 'search': return cmdSearch(args);
+    case 'artist': return cmdArtist(args);
     case 'show': return cmdShow();
     case 'get': return cmdGet(args);
     case 'upload': return cmdUpload(args);
@@ -861,6 +937,7 @@ async function main() {
   login                              扫码登录网易云（弹二维码）
   whoami                             查看当前登录账号
   search "<关键词>" [--limit 10]      搜索候选（打分排序）
+  artist "<歌手名>" [--page N]       按歌手浏览歌曲（每页 20 条，保留版本和合作曲目）
   show                               重新打印上次候选（不消耗站点配额）
   get --pick N [--quality flac|320]  下载第 N 个候选并写元数据/歌词
   upload <file...> [--title/--artist/--album]

@@ -86,6 +86,27 @@ export function rankCandidates(cands, ref) {
   return scored;
 }
 
+/** 歌手搜索：排除其他歌手，独唱排在合作曲目前；保留站点在组内的顺序。 */
+export function rankArtistCandidates(cands, artist) {
+  const normalized = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+  const want = normalized(artist);
+  const solo = [];
+  const collaborations = [];
+  for (const c of cands) {
+    const actual = normalized(c.artist);
+    if (!want || !actual.includes(want)) continue;
+    const bad = scoreCandidate(c, null).bad;
+    const entry = { ...c, _score: null, _reasons: [], _bad: bad };
+    (actual === want ? solo : collaborations).push(entry);
+  }
+  return [...solo, ...collaborations];
+}
+
+/** 重新获取过期签名时按歌曲 ID 找回原候选，避免页内顺序变化后下错歌。 */
+export function findArtistCandidateById(cands, songid) {
+  return cands.find((c) => String(c.songid ?? c.id ?? '') === String(songid)) || null;
+}
+
 /** 在候选的音质列表里挑目标格式。 */
 export function pickVariant(cand, quality = 'flac') {
   const mins = cand.minfo || [];
