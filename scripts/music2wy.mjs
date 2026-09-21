@@ -45,7 +45,7 @@ function parseArgs(argv) {
     if (a.startsWith('--')) {
       const k = a.slice(2);
       const bools = ['json', 'refresh', 'no-lyrics', 'no-tag', 'no-publish', 'open', 'no-cache',
-        'force', 'recommend', 'browser', 'headed'];
+        'force', 'recommend', 'browser', 'headed', 'verbose'];
       if (bools.includes(k)) { flags[k] = true; continue; }
       const v = argv[++i];
       flags[k] = v;
@@ -533,7 +533,10 @@ async function cmdGet(args) {
   const usedCachedUrl = !!info.url;
   let dl = null;
   try {
-    log(`[下载] ${info.url.slice(0, 100)}…`);
+    // 直链是上游音源地址，默认不打印，避免泄露到聊天回复里。
+    if (args.flags.verbose || process.env.MUSIC2WY_SHOW_URL === '1') {
+      log(`[下载] 直链 ${info.url.slice(0, 100)}…`);
+    }
     dl = await flac.download(info.url, outfile);
   } catch (e) {
     if (!usedCachedUrl) throw e;
