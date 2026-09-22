@@ -44,7 +44,7 @@ function parseArgs(argv) {
     if (a === '--') { positional.push(...argv.slice(i + 1)); break; }
     if (a.startsWith('--')) {
       const k = a.slice(2);
-      const bools = ['json', 'refresh', 'no-lyrics', 'no-tag', 'no-publish', 'open', 'no-cache',
+      const bools = ['json', 'refresh', 'no-lyrics', 'no-tag', 'no-publish', 'no-match', 'open', 'no-cache',
         'force', 'recommend', 'browser', 'headed', 'verbose'];
       if (bools.includes(k)) { flags[k] = true; continue; }
       const v = argv[++i];
@@ -612,7 +612,7 @@ async function cmdGet(args) {
     verify,
     lyricsFile: lyricsFile && fs.existsSync(lyricsFile) ? lyricsFile : null,
     tagged: tagResult.ok,
-    next: `确认无误后运行: node music2wy.mjs upload "${outfile}" --title "${meta.title}" --artist "${meta.artist}" --album "${meta.album}"`,
+    next: `确认无误后运行: node music2wy.mjs upload "${outfile}" --title "${meta.title}" --artist "${meta.artist}" --album "${meta.album}"${meta.neteaseId ? ` --netease-id ${meta.neteaseId}` : ''}`,
   });
 }
 
@@ -630,11 +630,15 @@ async function cmdUpload(args) {
       artist: args.flags.artist || a0 || '未知艺术家',
       album: args.flags.album || '未知专辑',
       publish: args.flags['no-publish'] ? false : cfg.publish,
+      neteaseId: args.flags['netease-id'] ? Number(args.flags['netease-id']) : null,
+      match: args.flags['no-match'] ? false : true,
     };
     log(`[上传] ${path.basename(f)} → 云盘 (${opts.title} / ${opts.artist}) …`);
     try {
       const r = await up.uploadFile(f, opts);
-      log(r.ok ? `[上传] ✅ songId=${r.songId}` : `[上传] ❌ ${r.error}`);
+      log(r.ok
+        ? `[上传] ✅ songId=${r.songId}${r.matched ? '（已匹配官方曲目）' : (r.matchError ? `（官方匹配失败: ${r.matchError}）` : '')}`
+        : `[上传] ❌ ${r.error}`);
       results.push({ file: f, ...r, meta: opts });
     } catch (e) {
       log(`[上传] ❌ ${e.message}`);
@@ -943,7 +947,7 @@ async function main() {
   artist "<歌手名>" [--page N]       按歌手浏览歌曲（每页 20 条，保留版本和合作曲目）
   show                               重新打印上次候选（不消耗站点配额）
   get --pick N [--quality flac|320]  下载第 N 个候选并写元数据/歌词
-  upload <file...> [--title/--artist/--album]
+  upload <file...> [--title/--artist/--album/--netease-id] [--no-match]
   publish <songId...>                重试发布（大文件转码没跟上时用）
   cloud [--limit 50]                 列出云盘歌曲
   playlist-add --name "歌单" --files a.flac,b.flac

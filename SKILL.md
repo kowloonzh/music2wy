@@ -146,14 +146,22 @@ node $SKILL_DIR/scripts/music2wy.mjs get --pick 1
 ### 第 4 步：上传到网易云盘
 
 ```bash
-node $SKILL_DIR/scripts/music2wy.mjs upload "<上一步返回的 file 路径>"
+node $SKILL_DIR/scripts/music2wy.mjs upload "<上一步返回的 file 路径>" --netease-id "<上一步 meta.neteaseId>"
 ```
 
 `upload` 会自己从文件名解析 `歌名 - 歌手`；也可以显式指定
 `--title "泸沽湖" --artist "麻园诗人" --album "不爱说话的人"`。
+**优先传 `get` 返回的 `--netease-id`**，这是网易云官方曲目 ID；没有官方 ID 时才省略。
 
 上传内部是这几步：`upload/check` → `nos/token/alloc` → 用 LBS 找真实上传节点 → 传 NOS
-→ `upload/cloud/info/v2` → `cloud/pub/v2`。最后一行的 **pub 必须成功**，否则歌曲不会出现在云盘列表里。
+→ `upload/cloud/info/v2` → `cloud/pub/v2` → `cloud/user/song/match`。**pub 必须成功**，
+否则歌曲不会出现在云盘列表里；有官方 ID 时，发布成功后会自动匹配官方曲目。
+
+自动匹配很重要：网易云会把云盘文件关联到官方曲库条目，然后才显示官方专辑、歌词和评论。
+本地标签不能替代这一步。匹配结果用 `matched: true/false` 表示；失败时不影响歌曲已发布，
+但要把 `matchError` 如实告诉用户。
+
+不要用 `--no-match` 关闭匹配，除非用户明确要求保留未匹配的云盘条目。
 
 **大文件（例如 20MB+ 的无损 FLAC）需要等服务端转码**，转码没完成时 pub 会返回 400；
 脚本会自动退避重试（最长约 3 分钟）。如果最终还是失败，返回里会带 `retryable: true`，
@@ -186,7 +194,7 @@ node $SKILL_DIR/scripts/music2wy.mjs playlist-add --name "我喜欢的" --files 
 ```bash
 node $SKILL_DIR/scripts/music2wy.mjs search "泸沽湖"        # 看候选，自己在心里挑
 node $SKILL_DIR/scripts/music2wy.mjs get --pick 1
-node $SKILL_DIR/scripts/music2wy.mjs upload "<file>"
+node $SKILL_DIR/scripts/music2wy.mjs upload "<file>" --netease-id "<get 返回的 meta.neteaseId>"
 ```
 
 即便如此，也**优先**花一句话告诉用户你挑了哪个版本、为什么。

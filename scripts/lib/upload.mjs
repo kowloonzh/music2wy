@@ -245,6 +245,49 @@ export async function cloudPublish(songId) {
 }
 
 /**
+ * 将已发布的云盘私有条目匹配到网易云官方曲目。
+ * 官方条目提供专辑、歌词、评论等元数据；本地标签不能替代这一步。
+ */
+export async function cloudMatchSong({ songId, adjustSongId }, { request = wapi, attempts = 2 } = {}) {
+  const cloudSongId = Number(songId);
+  const officialSongId = Number(adjustSongId);
+  if (!Number.isSafeInteger(cloudSongId) || cloudSongId <= 0) {
+    return { ok: false, matched: false, error: `无效的云盘 songId: ${songId}` };
+  }
+  if (!Number.isSafeInteger(officialSongId) || officialSongId <= 0) {
+    return { ok: false, matched: false, error: `无效的官方 adjustSongId: ${adjustSongId}` };
+  }
+  if (cloudSongId === officialSongId) {
+    return { ok: true, matched: true, skipped: 'already-matched', songId: officialSongId };
+  }
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const r = await request('https://music.163.com/weapi/cloud/user/song/match', {
+        songId: cloudSongId,
+        adjustSongId: officialSongId,
+      });
+      const body = r?.body || {};
+      if (body.code === 200 && body.data === true) {
+        return {
+          ok: true,
+          matched: true,
+          songId: officialSongId,
+          privateCloudSongId: cloudSongId,
+          code: body.code,
+          raw: body,
+        };
+      }
+      lastError = `code=${body.code} body=${JSON.stringify(body).slice(0, 240)}`;
+    } catch (e) {
+      lastError = String(e?.message || e);
+    }
+  }
+  return { ok: false, matched: false, code: null, error: lastError };
+}
+
+/**
  * 完整上传一首本地音频到云盘。
  * @returns {{ok:boolean, songId?:number, md5:string, steps:Array, error?:string}}
  */
@@ -316,7 +359,26 @@ export async function uploadFile(file, opts = {}) {
         steps.push({ step: 'cloud/list', existingSongId: existing.songId, fileName: existing.fileName });
         const pub = await cloudPublish(existing.songId);
         steps.push({ step: 'cloud/pub/v2', code: pub.body?.code, via: 'dedup-fallback' });
-        if (pub.ok) return { ok: true, deduped: true, songId: Number(existing.songId), md5, size, title, artist, album, steps };
+        if (pub.ok) {
+          let finalSongId = Number(existing.songId);
+          let matched = false;
+          let matchError = null;
+          if (opts.match !== false && opts.neteaseId) {
+            const match = await cloudMatchSong({ songId: finalSongId, adjustSongId: opts.neteaseId });
+            steps.push({ step: 'cloud/user/song/match', ...match, raw: undefined });
+            if (match.ok) {
+              matched = true;
+              finalSongId = match.songId;
+            } else {
+              matchError = match.error;
+            }
+          }
+          return {
+            ok: true, deduped: true, songId: finalSongId,
+            privateCloudSongId: Number(existing.songId), matched, matchError,
+            md5, size, title, artist, album, steps,
+          };
+        }
       }
       return {
         ok: false, md5, steps, retryable: true,
@@ -356,7 +418,24 @@ export async function uploadFile(file, opts = {}) {
       steps.push({ step: 'cloud/pub/v2', skipped: '--no-pub（该歌曲不会出现在云盘列表）' });
     }
 
-    return { ok: true, songId: Number(songId), md5, size, title, artist, album, steps };
+    let finalSongId = Number(songId);
+    let matched = false;
+    let matchError = null;
+    if (opts.match !== false && opts.neteaseId) {
+      const match = await cloudMatchSong({ songId: finalSongId, adjustSongId: opts.neteaseId });
+      steps.push({ step: 'cloud/user/song/match', ...match, raw: undefined });
+      if (match.ok) {
+        matched = true;
+        finalSongId = match.songId;
+      } else {
+        matchError = match.error;
+      }
+    }
+
+    return {
+      ok: true, songId: finalSongId, privateCloudSongId: Number(songId),
+      matched, matchError, md5, size, title, artist, album, steps,
+    };
   } catch (e) {
     return { ok: false, md5, steps, error: String((e && e.message) || e) };
   }

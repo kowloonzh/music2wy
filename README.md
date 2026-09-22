@@ -223,7 +223,7 @@ search "<关键词>" [--limit 10]      搜索候选（结合网易云元数据�
 artist "<歌手名>" [--page N]       按歌手浏览歌曲（每页最多 20 条）
 show                               重新打印上次候选（零请求）
 get --pick N [--quality flac|320]  下载第 N 个候选，写元数据/歌词
-upload <file...> [--title/--artist/--album]
+upload <file...> [--title/--artist/--album/--netease-id] [--no-match]
 publish <songId...>                重试发布（大文件转码没跟上时用）
 cloud [--limit 50]                 列出云盘歌曲
 playlist-add --name "歌单" --files a.flac,b.flac
@@ -278,6 +278,8 @@ doctor [--site]                    环境自检（默认不打站点）
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--title/--artist/--album` | 从文件名 `歌名 - 歌手` 解析 | 云盘里显示的元数据 |
+| `--netease-id <id>` | `get` 输出的 `meta.neteaseId` | 发布成功后自动匹配官方曲目，恢复官方专辑、歌词和评论 |
+| `--no-match` | — | 关闭自动官方匹配；只建议排查问题时使用 |
 | `--no-publish` | — | **不发布**。注意：不发布的话歌曲不会出现在云盘列表 |
 
 **配置文件** `~/.music2wy/config.json`
@@ -401,8 +403,9 @@ scripts/
 node scripts/music2wy.mjs cloud --limit 10
 ```
 
-注意上传后 songId 可能会**变**——网易云会把你的云盘文件自动匹配到官方曲库条目，
-这时列表里显示的是官方 songId（`matchType` 从 `unmatched` 变成 `matched`）。这是好事。
+注意上传后 songId 可能会**变**——网易云会把你的云盘文件自动匹配到官方曲库条目。
+如果自动匹配没有发生，传 `--netease-id` 后脚本会在发布成功后调用云盘匹配接口；
+返回 `matched: true` 时，列表里显示官方 songId，专辑、歌词和评论也会恢复。
 
 **Q：为什么 `upload` 有时候很慢？**
 
@@ -487,6 +490,7 @@ rm -rf ~/.music2wy/cache/
 | 下载 FLAC/320K + 时长校验 | ✅ 实测（偏差 0%） |
 | 写元数据/封面/歌词（两级回退） | ✅ 实测 |
 | 云盘上传 + 转码等待 + 同 md5 去重 | ✅ 实测（含 56MB 大文件） |
+| 发布后自动官方匹配 | ✅ 接口实测；单元测试覆盖参数和结果转换 |
 | 加入歌单 / 云盘列表 / 清理 | ✅ 接口实测 |
 | 请求记账 / 跨进程限流闸门 | ✅ 实测 |
 | `--browser` 兜底 | 🟡 **部分**：浏览器链路本身已验证（能启动 Chrome、通过 CDP 读到含 HttpOnly 的 cookie），但**还没在目标站点上成功过一次**——每次测都撞上站点不可达 |
