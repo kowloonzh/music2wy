@@ -163,13 +163,21 @@ node $SKILL_DIR/scripts/music2wy.mjs upload "<上一步返回的 file 路径>" -
 
 不要用 `--no-match` 关闭匹配，除非用户明确要求保留未匹配的云盘条目。
 
-**大文件（例如 20MB+ 的无损 FLAC）需要等服务端转码**，转码没完成时 pub 会返回 400；
-脚本会自动退避重试（最长约 3 分钟）。如果最终还是失败，返回里会带 `retryable: true`，
-这时**过一两分钟**用返回的 songId 补一次发布即可：
+**大文件（例如 20MB+ 的无损 FLAC）需要等服务端转码**，转码没完成时 pub 可能返回 400 或 523；
+脚本会自动退避重试（最长约 3 分钟）。如果最终还是失败，返回里会带 `retryable: true`。
+这时先查一次云盘列表，因为有时 `publish` 返回失败但歌曲已经可见：
+
+```bash
+node $SKILL_DIR/scripts/music2wy.mjs cloud --limit 20
+```
+
+如果云盘里已经能看到目标歌曲，就向用户说明已进入云盘，不要继续重试。若仍不可见，过一两分钟用返回的 songId 补一次发布即可：
 
 ```bash
 node $SKILL_DIR/scripts/music2wy.mjs publish <songId>
 ```
+
+经验规则：若同一个 FLAC 的 `publish` 连续 2 次以上仍是 `transcodeStatus=9` + `code=523`，尤其等待 5–10 分钟后仍失败，就不要反复轮询；告知用户网易云服务端转码卡住，并建议改传 320K MP3。继续高频重试通常没有帮助。
 
 同一个文件重复上传不会产生重复条目：`upload/check` 会返回 `needUpload: false`，
 脚本会从云盘里找回已有的 songId（返回 `deduped: true`）并确保它已发布。
